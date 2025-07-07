@@ -7,34 +7,24 @@ import database as db
 db.init_database()
 db.create_demo_user()
 
-# --- Custom CSS for Valorant Theme ---
+# --- Custom CSS for Valorant Theme with Dracula Sidebar ---
 VALORANT_CSS = """
 <style>
 body, .stApp {
     background-color: #0f1923;
     color: #fff;
 }
-/* Sidebar styling - Comprehensive approach */
-.sidebar .sidebar-content, 
-.css-1d391kg, 
-.css-1lcbmhc, 
-.css-1v0mbdj, 
-.css-1wivap2,
-[data-testid="stSidebar"],
-.css-1d391kg .css-1lcbmhc,
-.css-1v0mbdj .css-1wivap2,
-.css-1d391kg,
-.css-1lcbmhc,
-.css-1v0mbdj,
-.css-1wivap2 {
-    background: #ff4655 !important;
-    background-color: #ff4655 !important;
+/* Sidebar ONLY Dracula theme */
+[data-testid="stSidebar"], .sidebar .sidebar-content {
+    background: #44475a !important;
+    background-color: #44475a !important;
 }
-/* Additional sidebar elements */
-.css-1d391kg .css-1lcbmhc .css-1v0mbdj,
-.css-1d391kg .css-1lcbmhc .css-1wivap2 {
-    background: #ff4655 !important;
-    background-color: #ff4655 !important;
+/* Top header bar fix */
+header[data-testid="stHeader"] {
+    background: #0f1923 !important;
+    color: #fff !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 .stButton>button {
     background: #ff4655;
@@ -45,7 +35,6 @@ body, .stApp {
 .stButton>button:hover {
     background: #ff4655cc;
 }
-/* Form submit buttons - Round and beautiful */
 .stFormSubmitButton>button {
     background: linear-gradient(135deg, #ff4655, #ff6b7a) !important;
     color: white !important;
@@ -73,7 +62,6 @@ body, .stApp {
     background: #1a232e;
     color: #fff;
 }
-/* Input label headings white */
 label, .css-1c7y2kd, .stTextInput label, .stTextInput>label, .stTextInput label span {
     color: #fff !important;
 }
@@ -321,10 +309,16 @@ def main():
         else:
             login_page()
     else:
-        # Sidebar navigation
-        st.sidebar.title("🧭 Navigation")
+        # Modern Sidebar navigation with Dracula theme
+        st.sidebar.markdown("""
+        <div style="text-align: center; margin-bottom: 30px;">
+            <h2 style="color: #bd93f9; margin-bottom: 5px;">🎮</h2>
+            <h3 style="color: #f8f8f2; margin: 0;">Valorant Hub</h3>
+        </div>
+        """, unsafe_allow_html=True)
+        
         menu = ["📊 Dashboard", "🛒 Store", "🎒 Inventory", "📈 Match History", "✏️ Edit Profile", "🚪 Logout"]
-        choice = st.sidebar.selectbox("📋 Menu", menu)
+        choice = st.sidebar.selectbox("🧭 Navigation", menu)
         
         if choice == "📊 Dashboard":
             dashboard_page()
