@@ -33,6 +33,8 @@ def init_database():
             registration_date TEXT,
             phone_verified BOOLEAN DEFAULT 0,
             email_verified BOOLEAN DEFAULT 0,
+            episode TEXT,
+            act TEXT,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
@@ -176,8 +178,8 @@ def verify_user(username, email, password):
         SELECT id, password_hash, status, ban_type, suspension_end, email_verified
         FROM users u
         LEFT JOIN user_details ud ON u.id = ud.user_id
-        WHERE u.username = ? AND u.email = ?
-    ''', (username, email))
+        WHERE u.username = ?
+    ''', (username,))
     
     result = cursor.fetchone()
     conn.close()
@@ -241,6 +243,8 @@ def get_user_data(user_id):
             'registration_date': details[6] if details else '',
             'phone_verified': bool(details[7]) if details else False,
             'email_verified': bool(details[8]) if details else False,
+            'episode': details[9] if len(details) > 9 and details[9] else '',
+            'act': details[10] if len(details) > 10 and details[10] else '',
         },
         'store': {
             'valorant_points': store[1] if store else 0,

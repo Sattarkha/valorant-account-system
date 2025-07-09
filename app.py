@@ -2,6 +2,8 @@ import streamlit as st
 from datetime import datetime
 from database import create_user, verify_user, get_user_data, auto_verify_email, add_match_history, update_user_details
 import database as db
+import pandas as pd
+import os
 
 # Initialize database
 db.init_database()
@@ -113,7 +115,6 @@ def login_page():
     
     with st.form("login_form"):
         username = st.text_input("Username")
-        email = st.text_input("Email")
         password = st.text_input("Password", type="password")
         
         col1, col2 = st.columns(2)
@@ -123,7 +124,7 @@ def login_page():
             register_btn = st.form_submit_button("Register")
         
         if login_btn:
-            user_data = verify_user(username, email, password)
+            user_data = verify_user(username, None, password)  # Email hata diya
             if not user_data:
                 st.error("Credential's not match")
             elif user_data['status'] == 'banned':
@@ -154,9 +155,23 @@ def login_page():
 def dashboard_page():
     user_data = get_user_data(st.session_state.user_id)
     d = user_data['details']
-    
+
     st.title("📊 Dashboard")
     st.subheader("👤 Account Details")
+    
+    # Rank icon mapping (emoji fallback)
+    rank_icons = {
+        'Iron': '⚫',
+        'Bronze': '🥉',
+        'Silver': '🥈',
+        'Gold': '🥇',
+        'Platinum': '💎',
+        'Diamond': '🔷',
+        'Ascendant': '🟩',
+        'Immortal': '🔴',
+        'Radiant': '🌟',
+        'Unranked': '❔',
+    }
     
     col1, col2 = st.columns(2)
     with col1:
@@ -165,7 +180,17 @@ def dashboard_page():
         st.write(f"**Country:** {d['country']}")
         st.write(f"**Level:** {d['level']}")
     with col2:
-        st.write(f"**Rank:** {d['rank']}")
+        rank_value = d['rank'] if d['rank'] else 'Unranked'
+        icon_path = os.path.join(os.path.dirname(__file__), "rank_icons", f"{rank_value.lower()}.png")
+        if os.path.exists(icon_path):
+            st.image(icon_path, width=40)
+        else:
+            icon = rank_icons.get(rank_value, '❔')
+            st.write(icon)
+        rank_line = rank_value
+        if d.get('episode') or d.get('act'):
+            rank_line += f" - Episode {d.get('episode','')} Act {d.get('act','')}"
+        st.write(f"**Rank:** {rank_line}")
         st.write(f"**Registration date:** {d['registration_date']}")
         st.write(f"**Phone verified:** {'Yes' if d['phone_verified'] else 'No'}")
         st.write(f"**Email verified:** {'Yes' if d['email_verified'] else 'No'}")
@@ -197,7 +222,68 @@ def inventory_page():
     
     st.title("🎒 Inventory")
     
-    tabs = st.tabs(["🔫 Skins", "🎯 Battlepass", "🐾 Buddies", "👤 Agents", "🃏 Cards", "🏆 Titles"])
+    # Item prices
+    prices = {
+        'skins': 875,
+        'battlepass': 1000,
+        'buddies': 475,
+        'agents': 1000,
+        'cards': 375,
+        'titles': 200,
+    }
+    # Total value calculation
+    total_value = (
+        len(inv['skins']) * prices['skins'] +
+        len(inv['battlepass']) * prices['battlepass'] +
+        len(inv['buddies']) * prices['buddies'] +
+        len(inv['agents']) * prices['agents'] +
+        len(inv['cards']) * prices['cards'] +
+        len(inv['titles']) * prices['titles']
+    )
+    st.markdown(f"<h4 style='color:#ff4655;'>Total Value: {total_value} VP</h4>", unsafe_allow_html=True)
+    
+    # Breakdown
+    st.markdown("<b>Breakdown:</b>", unsafe_allow_html=True)
+    st.write(f"Skins ({len(inv['skins'])}): {len(inv['skins']) * prices['skins']} VP")
+    st.write(f"Battlepass ({len(inv['battlepass'])}): {len(inv['battlepass']) * prices['battlepass']} VP")
+    st.write(f"Buddies ({len(inv['buddies'])}): {len(inv['buddies']) * prices['buddies']} VP")
+    st.write(f"Agents ({len(inv['agents'])}): {len(inv['agents']) * prices['agents']} VP")
+    st.write(f"Cards ({len(inv['cards'])}): {len(inv['cards']) * prices['cards']} VP")
+    st.write(f"Titles ({len(inv['titles'])}): {len(inv['titles']) * prices['titles']} VP")
+    
+    # Export Data Button
+    if st.button("⬇️ Export All Data (CSV)"):
+        # Profile
+        profile_df = pd.DataFrame([user_data['details']])
+        # Inventory
+        inventory_df = pd.DataFrame({
+            'skins': [', '.join(inv['skins'])],
+            'battlepass': [', '.join(inv['battlepass'])],
+            'buddies': [', '.join(inv['buddies'])],
+            'agents': [', '.join(inv['agents'])],
+            'cards': [', '.join(inv['cards'])],
+            'titles': [', '.join(inv['titles'])],
+        })
+        # Match History
+        match_df = pd.DataFrame(user_data['match_history'])
+        # Combine all
+        with pd.ExcelWriter('user_export.xlsx') as writer:
+            profile_df.to_excel(writer, sheet_name='Profile', index=False)
+            inventory_df.to_excel(writer, sheet_name='Inventory', index=False)
+            match_df.to_excel(writer, sheet_name='MatchHistory', index=False)
+        with open('user_export.xlsx', 'rb') as f:
+            st.download_button('Download Exported Data', f, file_name='user_export.xlsx')
+    
+    # Tabs ke naam ke sath count
+    tab_names = [
+        f"🔫 Skins ({len(inv['skins'])})",
+        f"🎯 Battlepass ({len(inv['battlepass'])})",
+        f"🐾 Buddies ({len(inv['buddies'])})",
+        f"👤 Agents ({len(inv['agents'])})",
+        f"🃏 Cards ({len(inv['cards'])})",
+        f"🏆 Titles ({len(inv['titles'])})",
+    ]
+    tabs = st.tabs(tab_names)
     
     with tabs[0]:
         st.subheader("🔫 Skins")
@@ -271,11 +357,11 @@ def match_history_page():
         for match in matches:
             color = "green" if match['result'] == 'Win' else "red" if match['result'] == 'Loss' else "orange"
             st.markdown(f"""
-            <div style="background: #1a232e; padding: 10px; border-radius: 5px; margin: 5px 0;">
-                <span style="color: {color}; font-weight: bold;">{match['result']}</span> | 
+            <div style=\"background: #1a232e; padding: 10px; border-radius: 5px; margin: 5px 0;\">
+                <span style=\"color: {color}; font-weight: bold;\">{match['result']}</span> | 
                 <span>{match['date']}</span> | 
                 <span>{match['score']}</span> | 
-                <a href="{match['link']}" target="_blank">Link</a>
+                <a href=\"{match['link']}\" target=\"_blank\" style=\"color: #2196f3; font-weight: bold; text-decoration: underline;\">Link</a>
             </div>
             """, unsafe_allow_html=True)
     else:
@@ -294,12 +380,69 @@ def profile_edit_page():
         country = st.text_input("Country", value=d['country'])
         level = st.number_input("Level", min_value=1, value=d['level'])
         rank = st.selectbox("Rank", ["Unranked", "Iron", "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Ascendant", "Immortal", "Radiant"], index=["Unranked", "Iron", "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Ascendant", "Immortal", "Radiant"].index(d['rank']) if d['rank'] in ["Unranked", "Iron", "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Ascendant", "Immortal", "Radiant"] else 0)
+        episode = st.text_input("Episode", value=d.get('episode', ''))
+        act = st.text_input("Act", value=d.get('act', ''))
         
         submitted = st.form_submit_button("Update Profile")
         
         if submitted:
-            update_user_details(st.session_state.user_id, name=name, region=region, country=country, level=level, rank=rank)
+            update_user_details(st.session_state.user_id, name=name, region=region, country=country, level=level, rank=rank, episode=episode, act=act)
             st.success("Profile updated successfully!")
+
+# --- Bulk Import Page ---
+def bulk_import_page():
+    st.title("📥 Bulk Import Users")
+    st.write("Ek CSV file upload karein jisme username aur password columns hoon.")
+    
+    uploaded_file = st.file_uploader("CSV File Upload karein", type=["csv"])
+    if uploaded_file:
+        import pandas as pd
+        df = pd.read_csv(uploaded_file)
+        if 'username' not in df.columns or 'password' not in df.columns:
+            st.error("CSV me 'username' aur 'password' columns lazmi hain!")
+        else:
+            st.write("### Results:")
+            results = []
+            for idx, row in df.iterrows():
+                user_data = verify_user(row['username'], None, row['password'])
+                if user_data:
+                    results.append({"username": row['username'], "status": "Success"})
+                else:
+                    results.append({"username": row['username'], "status": "Fail"})
+            st.dataframe(results)
+
+# --- Bulk Registration Page ---
+def bulk_registration_page():
+    st.title("📝 Bulk Registration")
+    st.write("Upload a CSV file with columns: username, email, password, name, region, country. Each row will be registered as a new user. Password must be plain text.")
+    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"], key="bulk_reg")
+    if uploaded_file:
+        import pandas as pd
+        df = pd.read_csv(uploaded_file)
+        required_cols = ["username", "email", "password", "name", "region", "country"]
+        if not all(col in df.columns for col in required_cols):
+            st.error("CSV must have these columns: username, email, password, name, region, country")
+        else:
+            st.write("### Registration Results:")
+            results = []
+            for idx, row in df.iterrows():
+                try:
+                    success = create_user(
+                        str(row['username']).strip(),
+                        str(row['email']).strip(),
+                        str(row['password']).strip(),
+                        str(row['name']).strip(),
+                        str(row['region']).strip(),
+                        str(row['country']).strip()
+                    )
+                    if success:
+                        results.append({"username": row['username'], "status": "Registered"})
+                    else:
+                        results.append({"username": row['username'], "status": "Already Exists/Fail"})
+                except Exception as e:
+                    results.append({"username": row.get('username', ''), "status": f"Error: {e}"})
+            st.dataframe(results)
+            st.success("Bulk registration process completed. Now you can login with these accounts.")
 
 # --- Main App ---
 def main():
@@ -317,7 +460,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        menu = ["📊 Dashboard", "🛒 Store", "🎒 Inventory", "📈 Match History", "✏️ Edit Profile", "🚪 Logout"]
+        menu = ["📊 Dashboard", "🛒 Store", "🎒 Inventory", "📈 Match History", "✏️ Edit Profile", "📝 Bulk Registration", "🚪 Logout"]
         choice = st.sidebar.selectbox("🧭 Navigation", menu)
         
         if choice == "📊 Dashboard":
@@ -330,6 +473,8 @@ def main():
             match_history_page()
         elif choice == "✏️ Edit Profile":
             profile_edit_page()
+        elif choice == "📝 Bulk Registration":
+            bulk_registration_page()
         elif choice == "🚪 Logout":
             st.session_state.logged_in = False
             st.session_state.user_id = None
