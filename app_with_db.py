@@ -1,6 +1,8 @@
 import streamlit as st
 from datetime import datetime
 import database as db
+from scrape_valorant_skins import scrape_valorant_skins
+from database import calculate_account_skin_value
 
 # Initialize database
 db.init_database()
@@ -197,6 +199,15 @@ def dashboard_page():
         st.warning("Unranked")
     else:
         st.success("Ready for Competitive")
+    # --- Scrape Skins Button ---
+    if st.button("Scrape Valorant Bundles & Skins"):
+        scrape_valorant_skins()
+        st.success("Scraping complete! Data updated.")
+    # --- Account Value Button ---
+    if st.button("Show My Account Skin Value"):
+        result = calculate_account_skin_value(st.session_state.user_id)
+        st.info(f"Total Skin Value: {result['total_value_vp']} VP")
+        st.write(result['details'])
 
 # --- Store Page ---
 def store_page():

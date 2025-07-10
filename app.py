@@ -1,13 +1,37 @@
 import streamlit as st
 from datetime import datetime
-from database import create_user, verify_user, get_user_data, auto_verify_email, add_match_history, update_user_details
+from database import create_user, verify_user, get_user_data, auto_verify_email, add_match_history, update_user_details, purchase_skin, purchase_bundle
 import database as db
 import pandas as pd
 import os
+from urllib.parse import parse_qs
+import sqlite3
+from scrape_valorant_skins import scrape_valorant_skins
+from database import calculate_account_skin_value
 
 # Initialize database
 db.init_database()
 db.create_demo_user()
+
+# Temporary: Drop and recreate bundle_skins table with image_url column
+import sqlite3
+conn = sqlite3.connect('valorant_game.db')
+cursor = conn.cursor()
+cursor.execute('DROP TABLE IF EXISTS bundle_skins')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS bundle_skins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bundle_id INTEGER,
+        skin_name TEXT NOT NULL,
+        skin_type TEXT,
+        value_vp INTEGER,
+        image_url TEXT,
+        FOREIGN KEY (bundle_id) REFERENCES bundles (id)
+    )
+''')
+conn.commit()
+conn.close()
+print("bundle_skins table recreated with image_url column.")
 
 # --- Custom CSS for Valorant Theme with Dracula Sidebar ---
 VALORANT_CSS = """
@@ -199,14 +223,26 @@ def dashboard_page():
         st.warning("Unranked")
     else:
         st.success("Ready for Competitive")
+    # --- Scrape Skins Button ---
+    if st.button("Scrape Valorant Bundles & Skins"):
+        scrape_valorant_skins()
+        st.success("Scraping complete! Data updated.")
+    # --- Account Value Button ---
+    if st.button("Show My Account Skin Value"):
+        result = calculate_account_skin_value(st.session_state.user_id)
+        st.info(f"Total Skin Value: {result['total_value_vp']} VP")
+        st.write(result['details'])
+
+    # User data link
+    user_link = f"{st.get_option('server.address') or 'http://localhost:8501'}?user_id={st.session_state.user_id}"
+    st.markdown(f"[🔗 View as Link]({user_link})  ")
+    st.code(user_link, language='text')
 
 # --- Store Page ---
 def store_page():
     user_data = get_user_data(st.session_state.user_id)
     s = user_data['store']
-    
     st.title("🛒 Store")
-    
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Valorant Points", s['valorant_points'])
@@ -214,6 +250,42 @@ def store_page():
         st.metric("Radiant Points", s['radiant_points'])
     with col3:
         st.metric("Kingdom Points", s['kingdom_points'])
+    st.subheader("Available Skins")
+    import sqlite3
+    conn = sqlite3.connect('valorant_game.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT skin_name, value_vp FROM bundle_skins')
+    skins = cursor.fetchall()
+    for skin_name, value_vp in skins:
+        col1, col2 = st.columns([3,1])
+        with col1:
+            st.write(f"{skin_name} - {value_vp if value_vp else 'N/A'} VP")
+        with col2:
+            if st.button(f"Buy {skin_name}"):
+                success, msg = purchase_skin(st.session_state.user_id, skin_name)
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+    st.subheader("Available Bundles")
+    cursor.execute('SELECT id, bundle_name FROM bundles')
+    bundles = cursor.fetchall()
+    for bundle_id, bundle_name in bundles:
+        cursor.execute('SELECT value_vp FROM bundle_skins WHERE bundle_id = ?', (bundle_id,))
+        prices = [row[0] for row in cursor.fetchall() if row[0]]
+        total_price = sum(prices)
+        skin_count = len(prices)
+        col1, col2 = st.columns([3,1])
+        with col1:
+            st.write(f"{bundle_name} - {skin_count} skins - {total_price} VP")
+        with col2:
+            if st.button(f"Buy Bundle {bundle_id}"):
+                success, msg = purchase_bundle(st.session_state.user_id, bundle_id)
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+    conn.close()
 
 # --- Inventory Page ---
 def inventory_page():
@@ -222,34 +294,20 @@ def inventory_page():
     
     st.title("🎒 Inventory")
     
-    # Item prices
-    prices = {
-        'skins': 875,
-        'battlepass': 1000,
-        'buddies': 475,
-        'agents': 1000,
-        'cards': 375,
-        'titles': 200,
-    }
-    # Total value calculation
-    total_value = (
-        len(inv['skins']) * prices['skins'] +
-        len(inv['battlepass']) * prices['battlepass'] +
-        len(inv['buddies']) * prices['buddies'] +
-        len(inv['agents']) * prices['agents'] +
-        len(inv['cards']) * prices['cards'] +
-        len(inv['titles']) * prices['titles']
-    )
+    # Item prices (only skins and battlepass count for total value)
+    skin_value = 875  # Dummy value, can be updated later
+    battlepass_value = 1000
+    total_value = len(inv['skins']) * skin_value + len(inv['battlepass']) * battlepass_value
     st.markdown(f"<h4 style='color:#ff4655;'>Total Value: {total_value} VP</h4>", unsafe_allow_html=True)
     
     # Breakdown
     st.markdown("<b>Breakdown:</b>", unsafe_allow_html=True)
-    st.write(f"Skins ({len(inv['skins'])}): {len(inv['skins']) * prices['skins']} VP")
-    st.write(f"Battlepass ({len(inv['battlepass'])}): {len(inv['battlepass']) * prices['battlepass']} VP")
-    st.write(f"Buddies ({len(inv['buddies'])}): {len(inv['buddies']) * prices['buddies']} VP")
-    st.write(f"Agents ({len(inv['agents'])}): {len(inv['agents']) * prices['agents']} VP")
-    st.write(f"Cards ({len(inv['cards'])}): {len(inv['cards']) * prices['cards']} VP")
-    st.write(f"Titles ({len(inv['titles'])}): {len(inv['titles']) * prices['titles']} VP")
+    st.write(f"Skins ({len(inv['skins'])}): {len(inv['skins']) * skin_value} VP")
+    st.write(f"Battlepass ({len(inv['battlepass'])}): {len(inv['battlepass']) * battlepass_value} VP")
+    st.write(f"Buddies ({len(inv['buddies'])}): -")
+    st.write(f"Agents ({len(inv['agents'])}): -")
+    st.write(f"Cards ({len(inv['cards'])}): -")
+    st.write(f"Titles ({len(inv['titles'])}): -")
     
     # Export Data Button
     if st.button("⬇️ Export All Data (CSV)"):
@@ -391,25 +449,66 @@ def profile_edit_page():
 
 # --- Bulk Import Page ---
 def bulk_import_page():
-    st.title("📥 Bulk Import Users")
-    st.write("Ek CSV file upload karein jisme username aur password columns hoon.")
-    
-    uploaded_file = st.file_uploader("CSV File Upload karein", type=["csv"])
+    st.title("📥 Bulk Account Check")
+    st.write("Upload a CSV file containing username and password columns.")
+    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
     if uploaded_file:
         import pandas as pd
         df = pd.read_csv(uploaded_file)
         if 'username' not in df.columns or 'password' not in df.columns:
-            st.error("CSV me 'username' aur 'password' columns lazmi hain!")
+            st.error("The CSV must have 'username' and 'password' columns!")
         else:
             st.write("### Results:")
             results = []
             for idx, row in df.iterrows():
-                user_data = verify_user(row['username'], None, row['password'])
-                if user_data:
-                    results.append({"username": row['username'], "status": "Success"})
+                username = str(row['username']).strip()
+                password = str(row['password']).strip()
+                # Check if user exists
+                from database import hash_password
+                import sqlite3
+                conn = sqlite3.connect('valorant_game.db')
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, password_hash FROM users WHERE username = ?', (username,))
+                user_row = cursor.fetchone()
+                conn.close()
+                status = ""
+                user_link = ""
+                if not user_row:
+                    status = "User Not Found"
                 else:
-                    results.append({"username": row['username'], "status": "Fail"})
-            st.dataframe(results)
+                    user_id, stored_hash = user_row
+                    if stored_hash != hash_password(password):
+                        status = "Password Incorrect"
+                    else:
+                        user_data = verify_user(username, None, password)
+                        if user_data['status'] == 'locked':
+                            status = "Account Locked"
+                        elif user_data['status'] == 'banned':
+                            if user_data['ban_type'] == 'permanent':
+                                status = "Permanently Banned"
+                            else:
+                                status = f"Suspended until {user_data['suspension_end']}"
+                        elif not user_data['email_verified']:
+                            status = "Email Verification Required"
+                        else:
+                            details = get_user_data(user_data['user_id'])['details']
+                            inv = get_user_data(user_data['user_id'])['inventory']
+                            if not details['rank'] or details['rank'].lower() == 'unranked':
+                                status = "Unranked Account"
+                            elif details['rank']:
+                                status = f"Rank Ready: {details['rank']}"
+                            if inv['skins']:
+                                status += f" | Skins: {', '.join(inv['skins'])}"
+                            user_link = f"{st.get_option('server.address') or 'http://localhost:8501'}?user_id={user_data['user_id']}"
+                results.append({
+                    "username": username,
+                    "status": status,
+                    "user_link": user_link
+                })
+            st.dataframe(pd.DataFrame(results))
+            for r in results:
+                if r['user_link']:
+                    st.markdown(f"[{r['username']} Data Link]({r['user_link']})")
 
 # --- Bulk Registration Page ---
 def bulk_registration_page():
@@ -444,8 +543,58 @@ def bulk_registration_page():
             st.dataframe(results)
             st.success("Bulk registration process completed. Now you can login with these accounts.")
 
+# Skins se related imports, function calls, aur UI hata diye gaye hain
+
+def user_data_view_page():
+    query_params = st.query_params
+    user_id = query_params.get('user_id', [None])[0]
+    if not user_id:
+        st.error('No user_id provided in link.')
+        return
+    try:
+        user_id = int(user_id)
+    except ValueError:
+        st.error('Invalid user_id.')
+        return
+    from database import get_user_data
+    user_data = get_user_data(user_id)
+    if not user_data or not user_data['details']['name']:
+        st.error('User not found.')
+        return
+    d = user_data['details']
+    st.title(f"👤 {d['name']} (User ID: {user_id})")
+    st.write(f"**Region:** {d['region']}")
+    st.write(f"**Country:** {d['country']}")
+    st.write(f"**Level:** {d['level']}")
+    st.write(f"**Rank:** {d['rank']}")
+    st.write(f"**Registration date:** {d['registration_date']}")
+    st.write(f"**Phone verified:** {'Yes' if d['phone_verified'] else 'No'}")
+    st.write(f"**Email verified:** {'Yes' if d['email_verified'] else 'No'}")
+    st.markdown('---')
+    st.header('Inventory')
+    inv = user_data['inventory']
+    st.write(f"Skins: {', '.join(inv['skins']) if inv['skins'] else 'None'}")
+    st.write(f"Battlepass: {', '.join(inv['battlepass']) if inv['battlepass'] else 'None'}")
+    st.write(f"Buddies: {', '.join(inv['buddies']) if inv['buddies'] else 'None'}")
+    st.write(f"Agents: {', '.join(inv['agents']) if inv['agents'] else 'None'}")
+    st.write(f"Cards: {', '.join(inv['cards']) if inv['cards'] else 'None'}")
+    st.write(f"Titles: {', '.join(inv['titles']) if inv['titles'] else 'None'}")
+    st.markdown('---')
+    st.header('Match History')
+    matches = user_data['match_history']
+    if matches:
+        for match in matches:
+            st.write(f"{match['date']} | {match['result']} | {match['score']} | {match['link']}")
+    else:
+        st.write('No matches found.')
+
 # --- Main App ---
 def main():
+    # Skins se related koi bhi initialization ya function call nahi hai
+    query_params = st.query_params
+    if 'user_id' in query_params:
+        user_data_view_page()
+        return
     if not st.session_state.logged_in:
         if st.session_state.current_page == 'register':
             registration_page()
@@ -460,7 +609,10 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        menu = ["📊 Dashboard", "🛒 Store", "🎒 Inventory", "📈 Match History", "✏️ Edit Profile", "📝 Bulk Registration", "🚪 Logout"]
+        menu = [
+            "📊 Dashboard", "🛒 Store", "🎒 Inventory", "📈 Match History",
+            "✏️ Edit Profile", "📝 Bulk Registration", "📥 Bulk Account Check", "🚪 Logout"
+        ]
         choice = st.sidebar.selectbox("🧭 Navigation", menu)
         
         if choice == "📊 Dashboard":
@@ -475,6 +627,8 @@ def main():
             profile_edit_page()
         elif choice == "📝 Bulk Registration":
             bulk_registration_page()
+        elif choice == "📥 Bulk Account Check":
+            bulk_import_page()
         elif choice == "🚪 Logout":
             st.session_state.logged_in = False
             st.session_state.user_id = None
